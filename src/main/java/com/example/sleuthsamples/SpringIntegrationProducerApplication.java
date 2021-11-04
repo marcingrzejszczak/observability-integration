@@ -2,6 +2,9 @@ package com.example.sleuthsamples;
 
 import java.io.File;
 
+import brave.Tracer;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -12,10 +15,6 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.core.observability.event.Recorder;
-import org.springframework.core.observability.event.interval.IntervalEvent;
-import org.springframework.core.observability.event.interval.IntervalRecording;
-import org.springframework.core.observability.tracing.Tracer;
 import org.springframework.integration.annotation.Gateway;
 import org.springframework.integration.annotation.MessagingGateway;
 import org.springframework.integration.dsl.IntegrationFlow;
@@ -34,20 +33,20 @@ public class SpringIntegrationProducerApplication implements CommandLineRunner {
 	@Autowired FileGateway fileGateway;
 
 	@Autowired
-	Recorder<?> recorder;
+	MeterRegistry meterRegistry;
 
 	@Autowired
 	Tracer tracer;
 
 	@Override
 	public void run(String... args) throws Exception {
-		IntervalRecording<?> span = this.recorder.recordingFor((IntervalEvent) () -> "HELLO").start();
+		Timer.Sample sample = Timer.start(meterRegistry);
 		try {
-			String trace = tracer.currentSpan().context().traceId();
+			String trace = tracer.currentSpan().context().traceIdString();
 			log.info("<ACCEPTANCE_TEST> <TRACE:{}> Hello from producer", trace);
 			this.fileGateway.placeOrder(trace);
 		} finally {
-			span.close();
+			sample.stop(Timer.builder("hello").register(meterRegistry));
 		}
 	}
 }
@@ -69,7 +68,7 @@ class Config {
 	public IntegrationFlow files(Tracer tracer, @Value("${outputFile:${java.io.tmpdir}/spring-integration-sleuth-samples/output}") File file) {
 		return IntegrationFlows.from("files.input")
 				.transform(message -> {
-					String traceId = tracer.currentSpan().context().traceId();
+					String traceId = tracer.currentSpan().context().traceIdString();
 					log.info("<ACCEPTANCE_TEST> <TRACE:{}> Hello from consumer", traceId);
 					return message;
 				})
